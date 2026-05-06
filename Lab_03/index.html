@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Fajerwerki</title>
+    <style>
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px; pointer-events: auto; }
+        .control { margin-bottom: 10px; }
+        label { display: block; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="control">
+            <label>Grawitacja: <span id="grav-val">0.15</span></label>
+            <input type="range" id="gravity" min="0.05" max="0.5" step="0.01" value="0.15">
+        </div>
+        <div class="control">
+            <label>Liczba cząsteczek: <span id="part-val">100</span></label>
+            <input type="range" id="particleCount" min="20" max="1500" step="10" value="100">
+        </div>
+        <div id="fps">FPS: 60</div>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script src="script.js"></script>
+</body>
+</html>
