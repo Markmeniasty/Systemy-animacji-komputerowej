@@ -1,0 +1,139 @@
+import bpy
+import math
+import os
+
+# ==============================================================================
+# KONFIGURACJA I STAŁE
+# ==============================================================================
+SCIEZKA_LAB07 = r"C:/Users/marek/Desktop/Lab_7/roślina.blend"
+NAZWA_KOLEKCJI = "Red rose flower"
+
+KLATKA_START = 1
+KLATKA_KONIEC = 125
+FPS = 25
+
+# ==============================================================================
+# FUNKCJE POMOCNICZE I IMPORT
+# ==============================================================================
+def wyczysc_animacje(obj):
+    """Usuwa wszystkie F-Curves z obiektu, zapewniając idempotentność."""
+    if obj.animation_data and obj.animation_data.action:
+        obj.animation_data.action = None
+
+def importuj_rosline(sciezka_blend, nazwa_kolekcji):
+    """
+    Importuje wskazaną kolekcję z zewnętrznego pliku .blend.
+    """
+    if not os.path.exists(sciezka_blend):
+        print(f"BŁĄD: Plik źródłowy nie istnieje pod ścieżką: {sciezka_blend}")
+        return False
+        
+    sciezka_kolekcji = os.path.join(sciezka_blend, "Collection", nazwa_kolekcji)
+    try:
+        bpy.ops.wm.append(
+            filepath=sciezka_kolekcji,
+            directory=os.path.join(sciezka_blend, "Collection"),
+            filename=nazwa_kolekcji,
+        )
+        print(f"Pomyślnie zaimportowano kolekcję: {nazwa_kolekcji}")
+        return True
+    except Exception as e:
+        print(f"Wystąpił błąd podczas importu: {e}")
+        return False
+
+def ustaw_scene():
+    """Konfiguruje podstawowe parametry osi czasu i renderu."""
+    bpy.context.scene.frame_start = KLATKA_START
+    bpy.context.scene.frame_end = KLATKA_KONIEC
+    bpy.context.scene.render.fps = FPS
+    
+    # Usuwamy problematyczną linię z use_glowing_effects.
+    # Zamiast tego możesz ręcznie włączyć Bloom w panelu Render Properties (ikona aparatu).
+    print("Scena skonfigurowana (klatki i FPS).")
+
+# ==============================================================================
+# LOGIKA ANIMACJI
+# ==============================================================================
+def animuj_lisc(obj, faza, czestosc=0.05, amplituda=0.3):
+    """
+    Animuje rotację Y obiektu liścia za pomocą funkcji sinus.
+    """
+    wyczysc_animacje(obj)
+    rotacja_bazowa_y = obj.rotation_euler[1]
+    
+    for klatka in range(KLATKA_START, KLATKA_KONIEC + 1):
+        kat = rotacja_bazowa_y + amplituda * math.sin(klatka * czestosc + faza)
+        obj.rotation_euler[1] = kat
+        # Wstawiamy klatkę kluczową tylko dla osi Y (index=1)
+        obj.keyframe_insert(data_path="rotation_euler", frame=klatka, index=1)
+
+def animuj_wszystkie_liscie(prefix_liscia="Material_5"):
+    """
+    Wyszukuje obiekty liści i nakłada na nie asynchroniczną animację.
+    """
+    # Filtrowanie obiektów po nazwie (w tym dopasowanie np. Material_5.001, Material_5.002)
+    liscie = [obj for obj in bpy.data.objects if obj.name.startswith(prefix_liscia)]
+    
+    if not liscie:
+        print(f"Nie znaleziono liści z prefiksem '{prefix_liscia}'.")
+        print(f"Dostępne obiekty w scenie: {[o.name for o in bpy.data.objects]}")
+        return
+
+    for i, lisc in enumerate(liscie):
+        # Rozkładamy fazy równomiernie w pełnym okresie 2*pi
+        faza_lisc = i * (2 * math.pi / max(len(liscie), 1))
+        animuj_lisc(lisc, faza=faza_lisc)
+        
+    print(f"Zaanimowano asynchronicznie {len(liscie)} liści.")
+
+def animuj_czesci_paka(nazwy_czesci, klatka_start=30, klatka_koniec=90, skala_min=0.1, skala_max=1.0):
+    """
+    Animuje skalowanie grupy obiektów tworzących pąk kwiatu (otwieranie pąka).
+    """
+    istniejace_czesci = []
+    for nazwa in nazwy_czesci:
+        obj = bpy.data.objects.get(nazwa)
+        if obj:
+            istniejace_czesci.append(obj)
+            wyczysc_animacje(obj)
+        else:
+            print(f"Ostrzeżenie: Element pąka '{nazwa}' nie został znaleziony.")
+
+    if not istniejace_czesci:
+        print("Brak jakichkolwiek elementów pąka do zaanimowania.")
+        return
+
+    for obj in istniejace_czesci:
+        # Stan początkowy (zamknięty pąk) od początku animacji do klatki startowej otwierania
+        obj.scale = (skala_min, skala_min, skala_min)
+        obj.keyframe_insert(data_path="scale", frame=KLATKA_START)
+        obj.keyframe_insert(data_path="scale", frame=klatka_start)
+
+        # Stan końcowy (otwarty pąk) od momentu zakończenia otwierania do końca animacji
+        obj.scale = (skala_max, skala_max, skala_max)
+        obj.keyframe_insert(data_path="scale", frame=klatka_koniec)
+        obj.keyframe_insert(data_path="scale", frame=KLATKA_KONIEC)
+
+    print(f"Zaanimowano otwieranie pąka dla elementów: {[o.name for o in istniejace_czesci]}")
+
+# ==============================================================================
+# URUCHOMIENIE PROGRAMU
+# ==============================================================================
+if __name__ == "__main__" or True:
+    print("\n--- Rozpoczynanie skryptu animacji hybrydowej ---")
+    ustaw_scene()
+    
+    # Warunkowy import - jeśli kolekcja nie istnieje w bieżącej scenie, pobierz ją
+    if NAZWA_KOLEKCJI not in bpy.data.collections:
+        importuj_rosline(SCIEZKA_LAB07, NAZWA_KOLEKCJI)
+    else:
+        print(f"Kolekcja '{NAZWA_KOLEKCJI}' jest już obecna w scenie. Pomijam import.")
+
+    # Uruchomienie procedur animacji zgodnie z mapowaniem obiektów
+    animuj_wszystkie_liscie(prefix_liscia="Material_5")
+    
+    # Pąk składa się z trzech obiektów zdefiniowanych w strukturze assetu
+    elementy_paka = ["Material", "Material_2", "Material_3"]
+    animuj_czesci_paka(elementy_paka, klatka_start=30, klatka_koniec=90)
+    
+    print("--- Skrypt zakończony pomyślnie ---")
