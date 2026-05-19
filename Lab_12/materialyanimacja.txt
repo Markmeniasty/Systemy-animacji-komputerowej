@@ -1,0 +1,89 @@
+import bpy
+import math
+
+# Konfiguracja nazw i osi czasu
+NAZWA_MATERIALU = "Roslina_Bioluminescencja"
+NAZWA_NODE_EMISSION = "Emission"
+
+KLATKA_START = 1
+KLATKA_KONIEC = 125
+KLATKA_PAK_START = 30
+KLATKA_PAK_KONIEC = 90
+
+def znajdz_node(mat, nazwa, typ_zapasowy=None):
+    """Bezpiecznie wyciąga węzeł z drzewa materiału."""
+    node = mat.node_tree.nodes.get(nazwa)
+    if node is None and typ_zapasowy:
+        for n in mat.node_tree.nodes:
+            if n.type == typ_zapasowy:
+                return n
+    if node is None:
+        raise KeyError(f"Brak węzła '{nazwa}' w materiale {mat.name}")
+    return node
+
+def wyczysc_animacje_materialu(mat):
+    """Usuwa stare krzywe animacji shadera (idempotentność)."""
+    if mat.node_tree.animation_data and mat.node_tree.animation_data.action:
+        mat.node_tree.animation_data.action = None
+
+def pulsuj_emission(mat, min_str=0.5, max_str_bazowy=1.5, max_str_pik=8.0, okres=20):
+    """ Sinusoidalne pulsowanie energii świecenia zsynchronizowane z rozkwitem. """
+    emission = znajdz_node(mat, NAZWA_NODE_EMISSION, typ_zapasowy='EMISSION')
+    sciezka = f'nodes["{emission.name}"].inputs["Strength"].default_value'
+
+    for klatka in range(KLATKA_START, KLATKA_KONIEC + 1):
+        if KLATKA_PAK_START <= klatka <= KLATKA_PAK_KONIEC:
+            postep = (klatka - KLATKA_PAK_START) / (KLATKA_PAK_KONIEC - KLATKA_PAK_START)
+            max_str = max_str_bazowy + (max_str_pik - max_str_bazowy) * postep
+        elif klatka > KLATKA_PAK_KONIEC:
+            max_str = max_str_pik
+        else:
+            max_str = max_str_bazowy
+
+        srednia = (min_str + max_str) / 2.0
+        amplituda = (max_str - min_str) / 2.0
+        t = (klatka - KLATKA_START) * (2 * math.pi / okres)
+        
+        emission.inputs["Strength"].default_value = srednia + amplituda * math.sin(t)
+        mat.node_tree.keyframe_insert(data_path=sciezka, frame=klatka)
+
+def animuj_kolor_emisji(mat):
+    """Płynne przejście koloru przez całą animację (błękit -> zieleń)."""
+    emission = znajdz_node(mat, NAZWA_NODE_EMISSION, typ_zapasowy='EMISSION')
+    sciezka = f'nodes["{emission.name}"].inputs["Color"].default_value'
+
+    emission.inputs["Color"].default_value = (0.0, 0.5, 1.0, 1.0)
+    mat.node_tree.keyframe_insert(data_path=sciezka, frame=KLATKA_START)
+    
+    emission.inputs["Color"].default_value = (0.1, 1.0, 0.3, 1.0)
+    mat.node_tree.keyframe_insert(data_path=sciezka, frame=KLATKA_KONIEC)
+
+def animuj_tlo_swiata():
+    """Ściemnia tło otoczenia, tworząc kinowy kontrast dla wielkich pyłków."""
+    world = bpy.context.scene.world
+    if not world or not world.use_nodes:
+        if world: world.use_nodes = True
+        else: return
+    
+    bg_node = world.node_tree.nodes.get("Background")
+    if bg_node:
+        sciezka = f'nodes["{bg_node.name}"].inputs["Color"].default_value'
+        # Klatka 1: Standardowe tło szare
+        bg_node.inputs["Color"].default_value = (0.05, 0.05, 0.05, 1.0)
+        world.node_tree.keyframe_insert(data_path=sciezka, frame=KLATKA_START)
+        # Klatka 60: Całkowity mrok (idealny pod bioluminescencję)
+        bg_node.inputs["Color"].default_value = (0.002, 0.002, 0.005, 1.0)
+        world.node_tree.keyframe_insert(data_path=sciezka, frame=60)
+
+def main_materialy():
+    mat = bpy.data.materials.get(NAZWA_MATERIALU)
+    if not mat:
+        print(f"BŁĄD: Brak materiału '{NAZWA_MATERIALU}' w scenie!")
+        return
+    wyczysc_animacje_materialu(mat)
+    pulsuj_emission(mat)
+    animuj_kolor_emisji(mat)
+    animuj_tlo_swiata()
+    print("-> Część A: Zakończona sukcesem (Materiały + Kontrast Tła).")
+
+main_materialy()

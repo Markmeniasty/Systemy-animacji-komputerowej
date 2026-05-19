@@ -1,0 +1,138 @@
+import bpy
+import random
+import math
+
+# Stałe środowiskowe 
+NAZWA_KOLEKCJI = "Pyl"
+NAZWA_MATERIALU = "Pyl_Mat"
+LICZBA_CZASTECZEK = 150 
+KLATKA_START = 1
+KLATKA_KONIEC = 125
+
+SREDNICA_CZASTECZKI = 0.005  
+ZAKRES_EMISJI_XY = (-1.0, 1.0)
+WYSOKOSC_EMISJI_Z = (0.2, 0.5)
+SILA_WIATRU_X = 0.008
+
+SEED = 42
+
+class Czasteczka:
+    KLATKI_ZMIANY_SKALI = 10 
+
+    def __init__(self, indeks, klatka_narodzin, czas_zycia, pozycja_start, faza_unoszenia):
+        self.indeks = indeks
+        self.klatka_narodzin = klatka_narodzin
+        self.czas_zycia = czas_zycia
+        self.klatka_smierci = klatka_narodzin + czas_zycia
+        self.pozycja_start = pozycja_start
+        self.faza_unoszenia = faza_unoszenia
+        self.obj = None
+
+    def stworz_w_scenie(self, kolekcja, material):
+        """Generuje dużą sferę bezpośrednio w pamięci bez błędów kolekcji."""
+        mesh = bpy.data.meshes.new(name=f"PyłekMesh_{self.indeks:03d}")
+        self.obj = bpy.data.objects.new(name=f"Pyłek_{self.indeks:03d}", object_data=mesh)
+        
+        import bmesh
+        bm = bmesh.new()
+        # Wyższa rozdzielczość sfery (12/8), ponieważ duże obiekty potrzebują gładszych krawędzi
+        bmesh.ops.create_uvsphere(
+            bm, 
+            u_segments=12, 
+            v_segments=8, 
+            radius=SREDNICA_CZASTECZKI
+        )
+        bm.to_mesh(mesh)
+        bm.free()
+        
+        self.obj.location = self.pozycja_start
+        self.obj.data.materials.append(material)
+        kolekcja.objects.link(self.obj)
+
+    def wylicz_trajektorie(self, klatka):
+        t = klatka - self.klatka_narodzin
+        x = self.pozycja_start[0] + SILA_WIATRU_X * t
+        y = self.pozycja_start[1]
+        # Spokojne, szerokie falowanie w pionie
+        z = self.pozycja_start[2] + 0.35 * math.sin(t * 0.06 + self.faza_unoszenia)
+        return (x, y, z)
+
+    def wylicz_skale(self, klatka):
+        wiek = klatka - self.klatka_narodzin
+        if wiek < self.KLATKI_ZMIANY_SKALI:
+            return wiek / self.KLATKI_ZMIANY_SKALI
+        elif wiek > self.czas_zycia - self.KLATKI_ZMIANY_SKALI:
+            return (self.czas_zycia - wiek) / self.KLATKI_ZMIANY_SKALI
+        return 1.0
+
+    def generuj_keyframes(self):
+        if not self.obj: return
+        
+        self.obj.scale = (0.0, 0.0, 0.0)
+        self.obj.keyframe_insert("scale", frame=max(self.klatka_narodzin - 1, KLATKA_START))
+        self.obj.keyframe_insert("scale", frame=min(self.klatka_smierci + 1, KLATKA_KONIEC))
+
+        for klatka in range(self.klatka_narodzin, self.klatka_smierci + 1):
+            if klatka < KLATKA_START or klatka > KLATKA_KONIEC: continue
+            
+            self.obj.location = self.wylicz_trajektorie(klatka)
+            s = self.wylicz_skale(klatka)
+            self.obj.scale = (s, s, s)
+            
+            self.obj.keyframe_insert("location", frame=klatka)
+            self.obj.keyframe_insert("scale", frame=klatka)
+
+def przygotuj_kolekcje_czysta(nazwa):
+    kolekcja = bpy.data.collections.get(nazwa)
+    if kolekcja:
+        for obj in list(kolekcja.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+    else:
+        kolekcja = bpy.data.collections.new(nazwa)
+        bpy.context.scene.collection.children.link(kolekcja)
+    return kolekcja
+
+def stworz_material_pylu():
+    """Generuje potężny, silnie świecący złoty materiał emisyjny."""
+    mat = bpy.data.materials.get(NAZWA_MATERIALU)
+    if not mat:
+        mat = bpy.data.materials.new(name=NAZWA_MATERIALU)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    nodes.clear()
+    
+    out = nodes.new('ShaderNodeOutputMaterial')
+    emit = nodes.new('ShaderNodeEmission')
+    
+    # Jasny, jaskrawo-złoty kolor
+    emit.inputs["Color"].default_value = (1.0, 0.85, 0.4, 1.0) 
+    # Podbicie mocy świecenia do 12.0 - gwarantuje widowiskowy efekt z Bloomem!
+    emit.inputs["Strength"].default_value = 12.0 
+    
+    mat.node_tree.links.new(emit.outputs[0], out.inputs[0])
+    return mat
+
+def main_atmosfera():
+    random.seed(SEED)
+    kolekcja = przygotuj_kolekcje_czysta(NAZWA_KOLEKCJI)
+    material = stworz_material_pylu()
+    
+    klatek_na_fale = 12
+    czasteczek_per_fala = 6
+
+    for i in range(LICZBA_CZASTECZEK):
+        fala = i // czasteczek_per_fala
+        klatka_urodzenia = KLATKA_START + (fala * klatek_na_fale)
+        if klatka_urodzenia >= KLATKA_KONIEC: break
+            
+        czas_zycia = random.randint(40, 75)
+        start_pos = (random.uniform(*ZAKRES_EMISJI_XY), random.uniform(*ZAKRES_EMISJI_XY), random.uniform(*WYSOKOSC_EMISJI_Z))
+        faza = random.uniform(0, 2 * math.pi)
+        
+        pylek = Czasteczka(i, klatka_urodzenia, czas_zycia, start_pos, faza)
+        pylek.stworz_w_scenie(kolekcja, material)
+        pylek.generuj_keyframes()
+
+    print(f"-> Część B: Zakończona sukcesem. Wygenerowano {LICZBA_CZASTECZEK} wielkich pyłków.")
+
+main_atmosfera()
